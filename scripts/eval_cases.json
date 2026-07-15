@@ -1,0 +1,81 @@
+[
+  {
+    "question": "What is the linearity assumption in linear regression?",
+    "expected": [
+      {"source": "LINE_Assumptions_Quick_Reference.docx", "contains": "L - LINEARITY"}
+    ]
+  },
+  {
+    "question": "How do you detect independence violations using the Durbin-Watson test?",
+    "expected": [
+      {"source": "LINE_Assumptions_Quick_Reference.docx", "contains": "Durbin-Watson"}
+    ]
+  },
+  {
+    "question": "What does it mean for errors to be normally distributed?",
+    "expected": [
+      {"source": "LINE_Assumptions_Quick_Reference.docx", "contains": "N - NORMALITY"}
+    ]
+  },
+  {
+    "question": "What are the key linear regression formulas?",
+    "expected": [
+      {"source": "LINE_Assumptions_Quick_Reference.docx", "contains": "KEY FORMULAS"}
+    ]
+  },
+  {
+    "question": "Why do we square errors instead of using absolute value in linear regression?",
+    "expected": [
+      {"source": "LR1.docx", "contains": "Mathematical Tractability"},
+      {"source": "LR1.docx", "contains": "Penalizes Large Errors More"}
+    ]
+  },
+  {
+    "question": "Why isn't the absolute value function differentiable at zero?",
+    "expected": [
+      {"source": "LR1.docx", "contains": "derivative does NOT exist at e = 0"}
+    ]
+  },
+  {
+    "question": "Give an example of house prices having non-normal errors due to a natural floor.",
+    "expected": [
+      {"source": "Normality_of_Errors_Part4and5.docx", "contains": "natural floor but no ceiling"}
+    ]
+  },
+  {
+    "question": "Do the predictor variables (X) need to be normally distributed in linear regression?",
+    "expected": [
+      {"source": "Normality_of_Errors_Part4and5.docx", "contains": "No assumptions about distributi"}
+    ]
+  },
+  {
+    "question": "What is multicollinearity and how do you fix it?",
+    "expected": [
+      {"source": "linear_regression interview.docx", "contains": "multicollinearity"}
+    ]
+  },
+  {
+    "question": "What is the difference between overfitting and underfitting?",
+    "expected": [
+      {"source": "linear_regression interview.docx", "contains": "Overfitting (High Variance)"}
+    ]
+  },
+  {
+    "question": "What is the role of the learning rate in gradient descent?",
+    "expected": [
+      {"source": "linear_regression interview.docx", "contains": "learning rate"}
+    ]
+  },
+  {
+    "question": "What is heteroscedasticity and how do you detect it?",
+    "expected": [
+      {"source": "linear_regression interview.docx", "contains": "heteroscedasticity"}
+    ]
+  },
+  {
+    "question": "What are Type I and Type II errors in hypothesis testing?",
+    "expected": [
+      {"source": "linear_regression interview.docx", "contains": "Type I Error"}
+    ]
+  }
+]

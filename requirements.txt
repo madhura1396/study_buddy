@@ -2,3 +2,6 @@ chromadb
 sentence-transformers
 pypdf
 langchain-text-splitters
+groq
+python-dotenv
+python-docx

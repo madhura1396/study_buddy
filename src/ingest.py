@@ -4,6 +4,7 @@ from pathlib import Path
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
+from docx import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from pypdf import PdfReader
 
@@ -26,9 +27,14 @@ def read_pdf(path: Path) -> str:
     return "\n".join(page.extract_text() or "" for page in reader.pages)
 
 
+def read_docx(path: Path) -> str:
+    document = Document(str(path))
+    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+
+
 def load_documents(data_dir: Path = DATA_DIR) -> list[dict]:
     """Return a list of {"text": ..., "source": ...} for every supported file."""
-    readers = {".txt": read_txt, ".pdf": read_pdf}
+    readers = {".txt": read_txt, ".pdf": read_pdf, ".docx": read_docx}
     documents = []
     for path in sorted(data_dir.iterdir()):
         reader = readers.get(path.suffix.lower())
