@@ -1,0 +1,21 @@
+# Secrets & credentials
+.env
+*.env
+credentials.json
+token.json
+client_secret*.json
+
+# Local data & vector store
+data/**
+!data/sample_docs/.gitkeep
+chroma_db/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# OS
+.DS_Store
