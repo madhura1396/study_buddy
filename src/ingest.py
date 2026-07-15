@@ -1,12 +1,12 @@
 """Read files from DATA_DIR, chunk them, embed them, and store in ChromaDB."""
 
+import re
 from pathlib import Path
 
 import chromadb
 from chromadb.utils.embedding_functions import SentenceTransformerEmbeddingFunction
 from docx import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from pypdf import PdfReader
 
 from src.config import (
     CHROMA_DIR,
@@ -17,53 +17,91 @@ from src.config import (
     EMBEDDING_MODEL_NAME,
 )
 
-
-def read_txt(path: Path) -> str:
-    return path.read_text(encoding="utf-8", errors="ignore")
-
-
-def read_pdf(path: Path) -> str:
-    reader = PdfReader(str(path))
-    return "\n".join(page.extract_text() or "" for page in reader.pages)
+MD_HEADER_RE = re.compile(r"^(#{1,6})\s+(.*)")
+DOCX_HEADING_LEVEL_RE = re.compile(r"Heading (\d+)")
 
 
-def read_docx(path: Path) -> str:
+def parse_txt_sections(path: Path) -> list[dict]:
+    """Split plain text into sections using Markdown headers ("# Heading") as
+    section markers. A nested header (##, ###) keeps its parent header in the
+    heading path (joined by " > "), since a subsection's body text often
+    relies on context named only in its parent heading, not repeated in the
+    subsection itself. Text with no headers becomes a single section."""
+    sections = [{"heading": None, "text": ""}]
+    stack: list[str] = []
+    for line in path.read_text(encoding="utf-8", errors="ignore").splitlines():
+        match = MD_HEADER_RE.match(line.strip())
+        if match:
+            level = len(match.group(1))
+            stack[level - 1 :] = [match.group(2).strip()]
+            sections.append({"heading": " > ".join(stack), "text": ""})
+        else:
+            sections[-1]["text"] += line + "\n"
+    return sections
+
+
+def parse_docx_sections(path: Path) -> list[dict]:
+    """Use Word's own paragraph styles (Heading 1/2/3, ...) as section markers.
+    A nested heading (e.g. a Heading 3 under a Heading 2) keeps its parent
+    heading in the heading path, for the same reason as parse_txt_sections."""
     document = Document(str(path))
-    return "\n".join(paragraph.text for paragraph in document.paragraphs)
+    sections = [{"heading": None, "text": ""}]
+    stack: list[str] = []
+    for paragraph in document.paragraphs:
+        style_name = paragraph.style.name if paragraph.style else ""
+        level_match = DOCX_HEADING_LEVEL_RE.match(style_name)
+        if level_match:
+            level = int(level_match.group(1))
+            stack[level - 1 :] = [paragraph.text.strip()]
+            sections.append({"heading": " > ".join(stack), "text": ""})
+        else:
+            sections[-1]["text"] += paragraph.text + "\n"
+    return sections
 
 
 def load_documents(data_dir: Path = DATA_DIR) -> list[dict]:
-    """Return a list of {"text": ..., "source": ...} for every supported file."""
-    readers = {".txt": read_txt, ".pdf": read_pdf, ".docx": read_docx}
+    """Return a list of {"source": ..., "sections": [{"heading", "text"}, ...]}
+    for every supported file."""
+    parsers = {".txt": parse_txt_sections, ".docx": parse_docx_sections}
     documents = []
     for path in sorted(data_dir.iterdir()):
-        reader = readers.get(path.suffix.lower())
-        if reader is None:
+        parser = parsers.get(path.suffix.lower())
+        if parser is None:
             continue
-        text = reader(path)
-        if text.strip():
-            documents.append({"text": text, "source": path.name})
+        sections = [s for s in parser(path) if s["text"].strip()]
+        if sections:
+            documents.append({"source": path.name, "sections": sections})
     return documents
 
 
 def chunk_documents(documents: list[dict]) -> list[dict]:
-    """Split each document's text into overlapping chunks with source metadata."""
+    """Split each document's sections into chunks, sub-splitting only sections
+    that exceed CHUNK_SIZE. The heading is prefixed onto the embedded/stored
+    text (so its keywords help retrieval match) and also kept as its own
+    metadata field (so callers can reliably read it back without parsing)."""
     splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
         chunk_overlap=CHUNK_OVERLAP,
     )
     chunks = []
     for doc in documents:
-        pieces = splitter.split_text(doc["text"])
-        for i, piece in enumerate(pieces):
-            chunks.append(
-                {
-                    "id": f"{doc['source']}::chunk{i}",
-                    "text": piece,
-                    "source": doc["source"],
-                    "chunk_index": i,
-                }
-            )
+        chunk_index = 0
+        for section in doc["sections"]:
+            text = section["text"].strip()
+            heading = section["heading"] or ""
+            pieces = [text] if len(text) <= CHUNK_SIZE else splitter.split_text(text)
+            for piece in pieces:
+                stored_text = f"Section: {heading}\n{piece}" if heading else piece
+                chunks.append(
+                    {
+                        "id": f"{doc['source']}::chunk{chunk_index}",
+                        "text": stored_text,
+                        "source": doc["source"],
+                        "chunk_index": chunk_index,
+                        "heading": heading,
+                    }
+                )
+                chunk_index += 1
     return chunks
 
 
@@ -80,7 +118,7 @@ def run_ingestion() -> int:
     """Load, chunk, embed, and upsert all documents in DATA_DIR. Returns chunk count."""
     documents = load_documents()
     if not documents:
-        print(f"No .txt or .pdf files found in {DATA_DIR}")
+        print(f"No .txt or .docx files found in {DATA_DIR}")
         return 0
 
     chunks = chunk_documents(documents)
@@ -88,7 +126,10 @@ def run_ingestion() -> int:
     collection.upsert(
         ids=[c["id"] for c in chunks],
         documents=[c["text"] for c in chunks],
-        metadatas=[{"source": c["source"], "chunk_index": c["chunk_index"]} for c in chunks],
+        metadatas=[
+            {"source": c["source"], "chunk_index": c["chunk_index"], "heading": c["heading"]}
+            for c in chunks
+        ],
     )
 
     print(f"Ingested {len(documents)} document(s) -> {len(chunks)} chunk(s).")

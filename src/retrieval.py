@@ -16,6 +16,7 @@ def retrieve(query: str, top_k: int = 5) -> list[dict]:
                 "text": text,
                 "source": metadata["source"],
                 "chunk_index": metadata["chunk_index"],
+                "heading": metadata.get("heading", ""),
                 "distance": distance,
             }
         )
