@@ -79,12 +79,14 @@ def get_chunks_for_file(category: str, source: str) -> list[dict]:
 
 
 def build_scope_text(
-    category: str, sources: list[str], headings: Optional[list[str]] = None
+    file_refs: list[tuple[str, str]], headings: Optional[list[str]] = None
 ) -> str:
-    """Concatenate chunk text for the selected files, optionally narrowed to
-    only chunks whose heading is in `headings` (chapter-level selection)."""
+    """Concatenate chunk text for the selected files — each a (category,
+    source) pair, so selection can span multiple folders — optionally
+    narrowed to only chunks whose heading is in `headings` (chapter-level
+    selection, also spanning multiple files/folders)."""
     parts = []
-    for source in sources:
+    for category, source in file_refs:
         for chunk in get_chunks_for_file(category, source):
             if headings and chunk["heading"] not in headings:
                 continue

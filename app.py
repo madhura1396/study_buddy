@@ -322,20 +322,21 @@ with quiz_tab:
             st.session_state.quiz_progress = None
 
         st.subheader("Generate")
-        category = st.selectbox("Folder", sorted(by_category), key="quiz_category")
-        category_docs = by_category[category]
-        selected_sources = st.multiselect(
-            "Files", options=[d["source"] for d in category_docs], key="quiz_files"
+        selected_categories = st.multiselect(
+            "Folders", sorted(by_category), key="quiz_categories"
         )
+        candidate_docs = [d for d in docs if d["category"] in selected_categories]
 
-        available_headings = sorted(
-            {
-                h
-                for d in category_docs
-                if d["source"] in selected_sources
-                for h in d["headings"]
-            }
+        # Labeled with their folder so same-named files in different
+        # folders aren't ambiguous once selection spans multiple folders.
+        file_labels = {f"{d['category']} / {d['source']}": d for d in candidate_docs}
+        selected_file_labels = st.multiselect(
+            "Files", options=sorted(file_labels), key="quiz_files"
         )
+        selected_docs = [file_labels[label] for label in selected_file_labels]
+        selected_file_refs = [(d["category"], d["source"]) for d in selected_docs]
+
+        available_headings = sorted({h for d in selected_docs for h in d["headings"]})
         selected_headings = st.multiselect(
             "Chapters (leave empty to use the whole file)",
             options=available_headings,
@@ -357,16 +358,16 @@ with quiz_tab:
         mode = st.radio("Mode", ["Multiple choice", "Flashcards"], horizontal=True)
         count = st.slider("How many", min_value=3, max_value=15, value=5)
 
-        if st.button("Generate", disabled=not selected_sources):
+        if st.button("Generate", disabled=not selected_file_refs):
             with st.spinner("Generating..."):
                 try:
                     if grounded:
-                        content = build_scope_text(
-                            category, selected_sources, selected_headings or None
-                        )
+                        content = build_scope_text(selected_file_refs, selected_headings or None)
                     else:
-                        topics = ", ".join(s.rsplit(".", 1)[0] for s in selected_sources)
-                        content = f"{category}: {topics}"
+                        topics = ", ".join(
+                            source.rsplit(".", 1)[0] for _, source in selected_file_refs
+                        )
+                        content = f"{', '.join(selected_categories)}: {topics}"
                         if selected_headings:
                             content += " — focus areas: " + ", ".join(selected_headings)
 
@@ -379,7 +380,7 @@ with quiz_tab:
                     items = None
 
             if items:
-                scope_label = f"{category} — {', '.join(selected_sources)}"
+                scope_label = f"{', '.join(selected_categories)} — {', '.join(selected_file_labels)}"
                 if selected_headings:
                     scope_label += f" ({len(selected_headings)} chapter(s))"
                 if not grounded:
