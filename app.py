@@ -87,85 +87,7 @@ def category_picker(key_prefix: str) -> str:
     return choice
 
 
-with st.sidebar:
-    st.header("Import from Google Drive")
-    drive_search = st.text_input("Search by file or folder name", key="drive_search")
-    if st.button("Search Drive"):
-        try:
-            st.session_state.drive_results = list_importable_files(drive_search)
-        except MissingCredentialsError as e:
-            st.error(str(e))
-        except Exception as e:
-            st.error(f"Google Drive authentication/search failed: {e}")
-
-    drive_results = st.session_state.get("drive_results", [])
-    if drive_results:
-
-        def _label(f: dict) -> str:
-            return f"📁 {f['name']}" if f["mimeType"] == FOLDER_MIME_TYPE else f["name"]
-
-        labels_by_name = {_label(f): f for f in drive_results}
-        selected_labels = st.multiselect(
-            "Files & folders found (a folder imports everything inside it, "
-            "using the folder's name as the category)",
-            options=list(labels_by_name.keys()),
-        )
-        selected_entries = [labels_by_name[label] for label in selected_labels]
-        any_individual_files = any(e["mimeType"] != FOLDER_MIME_TYPE for e in selected_entries)
-        fallback_category = category_picker("drive") if any_individual_files else None
-
-        if st.button("Import selected", disabled=not selected_labels):
-            with st.spinner("Resolving folders, downloading, and ingesting..."):
-                resolved = resolve_to_files(selected_entries)
-                for f, category in resolved:
-                    dest_dir = DATA_DIR / (category or fallback_category)
-                    dest_dir.mkdir(parents=True, exist_ok=True)
-                    download_file(f, dest_dir=dest_dir)
-                run_ingestion()
-            st.session_state.drive_results = []
-            load_ingested_docs.clear()
-            st.success(f"Imported {len(resolved)} file(s).")
-            st.rerun()
-    elif "drive_results" in st.session_state:
-        st.caption("No matching files found.")
-
-    st.divider()
-    st.header("Upload from your computer")
-    uploaded_files = st.file_uploader(
-        "Upload .txt or .docx files", type=["txt", "docx"], accept_multiple_files=True
-    )
-    upload_category = category_picker("upload") if uploaded_files else None
-    if uploaded_files and st.button("Ingest uploaded files"):
-        with st.spinner("Saving and ingesting..."):
-            dest_dir = DATA_DIR / upload_category
-            dest_dir.mkdir(parents=True, exist_ok=True)
-            for uploaded in uploaded_files:
-                (dest_dir / uploaded.name).write_bytes(uploaded.getvalue())
-            run_ingestion()
-        load_ingested_docs.clear()
-        st.success(f"Ingested {len(uploaded_files)} file(s) into '{upload_category}'.")
-        st.rerun()
-
-    st.divider()
-    st.header("Import a local folder")
-    st.caption(
-        "Point at a folder on this computer, e.g. one containing subfolders "
-        "like 'linear regression', 'logistic', 'kmeans' — each subfolder is "
-        "imported as its own category, exactly as it's laid out on disk."
-    )
-    folder_path = st.text_input("Folder path", placeholder="/Users/you/ml", key="local_folder_path")
-    if st.button("Import folder", disabled=not folder_path):
-        try:
-            with st.spinner("Copying files and ingesting..."):
-                copied = import_local_folder(Path(folder_path).expanduser())
-                run_ingestion()
-            load_ingested_docs.clear()
-            st.success(f"Imported {copied} file(s).")
-            st.rerun()
-        except (NotADirectoryError, FileNotFoundError) as e:
-            st.error(str(e))
-
-ask_tab, materials_tab = st.tabs(["💬 Ask", "📂 Study Materials"])
+ask_tab, materials_tab, import_tab = st.tabs(["💬 Ask", "📂 Study Materials", "📥 Import"])
 
 with ask_tab:
     top_col, button_col = st.columns([5, 1])
@@ -222,8 +144,7 @@ with materials_tab:
     docs = load_ingested_docs()
     if not docs:
         st.info(
-            "No documents ingested yet. Use the sidebar to import from Google "
-            "Drive or upload files from your computer."
+            "No documents ingested yet. Head to the Import tab to add some."
         )
     else:
         st.subheader("Recently uploaded")
@@ -237,19 +158,100 @@ with materials_tab:
         for doc in docs:
             by_category.setdefault(doc["category"], []).append(doc)
 
+        # Each folder is its own (collapsed-by-default) expander; files
+        # inside are plain listings rather than nested expanders, since
+        # Streamlit doesn't support nesting an expander inside another.
         for category in sorted(by_category, key=lambda c: (c == UNCATEGORIZED, c)):
-            st.markdown(f"#### 📁 {category}")
-            for doc in by_category[category]:
-                with st.expander(doc["source"]):
+            category_docs = by_category[category]
+            with st.expander(f"📁 {category} ({len(category_docs)})"):
+                for doc in category_docs:
+                    st.markdown(f"**{doc['source']}**")
                     if doc["headings"]:
                         for h in doc["headings"]:
                             st.markdown(f"- {h}")
                     else:
                         st.caption("(no section headings detected)")
-                    if st.button(
-                        "🗑️ Delete", key=f"delete_{category}_{doc['source']}"
-                    ):
+                    if st.button("🗑️ Delete", key=f"delete_{category}_{doc['source']}"):
                         delete_document(category, doc["source"])
                         load_ingested_docs.clear()
                         st.success(f"Deleted {doc['source']}.")
                         st.rerun()
+                    st.divider()
+
+with import_tab:
+    st.subheader("Import from Google Drive")
+    drive_search = st.text_input("Search by file or folder name", key="drive_search")
+    if st.button("Search Drive"):
+        try:
+            st.session_state.drive_results = list_importable_files(drive_search)
+        except MissingCredentialsError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Google Drive authentication/search failed: {e}")
+
+    drive_results = st.session_state.get("drive_results", [])
+    if drive_results:
+
+        def _label(f: dict) -> str:
+            return f"📁 {f['name']}" if f["mimeType"] == FOLDER_MIME_TYPE else f["name"]
+
+        labels_by_name = {_label(f): f for f in drive_results}
+        selected_labels = st.multiselect(
+            "Files & folders found (a folder imports everything inside it, "
+            "using the folder's name as the category)",
+            options=list(labels_by_name.keys()),
+        )
+        selected_entries = [labels_by_name[label] for label in selected_labels]
+        any_individual_files = any(e["mimeType"] != FOLDER_MIME_TYPE for e in selected_entries)
+        fallback_category = category_picker("drive") if any_individual_files else None
+
+        if st.button("Import selected", disabled=not selected_labels):
+            with st.spinner("Resolving folders, downloading, and ingesting..."):
+                resolved = resolve_to_files(selected_entries)
+                for f, category in resolved:
+                    dest_dir = DATA_DIR / (category or fallback_category)
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    download_file(f, dest_dir=dest_dir)
+                run_ingestion()
+            st.session_state.drive_results = []
+            load_ingested_docs.clear()
+            st.success(f"Imported {len(resolved)} file(s).")
+            st.rerun()
+    elif "drive_results" in st.session_state:
+        st.caption("No matching files found.")
+
+    st.divider()
+    st.subheader("Upload from your computer")
+    uploaded_files = st.file_uploader(
+        "Upload .txt or .docx files", type=["txt", "docx"], accept_multiple_files=True
+    )
+    upload_category = category_picker("upload") if uploaded_files else None
+    if uploaded_files and st.button("Ingest uploaded files"):
+        with st.spinner("Saving and ingesting..."):
+            dest_dir = DATA_DIR / upload_category
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            for uploaded in uploaded_files:
+                (dest_dir / uploaded.name).write_bytes(uploaded.getvalue())
+            run_ingestion()
+        load_ingested_docs.clear()
+        st.success(f"Ingested {len(uploaded_files)} file(s) into '{upload_category}'.")
+        st.rerun()
+
+    st.divider()
+    st.subheader("Import a local folder")
+    st.caption(
+        "Point at a folder on this computer, e.g. one containing subfolders "
+        "like 'linear regression', 'logistic', 'kmeans' — each subfolder is "
+        "imported as its own category, exactly as it's laid out on disk."
+    )
+    folder_path = st.text_input("Folder path", placeholder="/Users/you/ml", key="local_folder_path")
+    if st.button("Import folder", disabled=not folder_path):
+        try:
+            with st.spinner("Copying files and ingesting..."):
+                copied = import_local_folder(Path(folder_path).expanduser())
+                run_ingestion()
+            load_ingested_docs.clear()
+            st.success(f"Imported {copied} file(s).")
+            st.rerun()
+        except (NotADirectoryError, FileNotFoundError) as e:
+            st.error(str(e))
