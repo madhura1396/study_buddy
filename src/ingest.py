@@ -9,6 +9,7 @@ letting the UI show recently-added files first.
 """
 
 import re
+import shutil
 from pathlib import Path
 
 import chromadb
@@ -165,6 +166,49 @@ def run_ingestion() -> int:
 
     print(f"Ingested {len(documents)} document(s) -> {len(chunks)} chunk(s).")
     return len(chunks)
+
+
+def delete_document(category: str, source: str, data_dir: Path = DATA_DIR) -> None:
+    """Remove a document's chunks from ChromaDB and delete its file on disk."""
+    collection = get_collection()
+    existing = collection.get(where={"$and": [{"category": category}, {"source": source}]})
+    if existing["ids"]:
+        collection.delete(ids=existing["ids"])
+
+    dest_dir = data_dir if category == UNCATEGORIZED else data_dir / category
+    file_path = dest_dir / source
+    if file_path.exists():
+        file_path.unlink()
+
+
+SUPPORTED_SUFFIXES = {".txt", ".docx"}
+
+
+def import_local_folder(root: Path, data_dir: Path = DATA_DIR) -> int:
+    """Copy every supported file found under a local folder into data_dir,
+    mirroring the same "folder name becomes the category" behavior as
+    Drive folder import: each of root's immediate subfolders (searched
+    recursively for files) becomes its own category; files directly in
+    root fall under Uncategorized. Returns how many files were copied.
+    Does not ingest — call run_ingestion() after."""
+    if not root.is_dir():
+        raise NotADirectoryError(f"{root} is not a folder")
+
+    copied = 0
+    for entry in sorted(root.iterdir()):
+        if entry.is_file() and entry.suffix.lower() in SUPPORTED_SUFFIXES:
+            dest_dir = data_dir / UNCATEGORIZED
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(entry, dest_dir / entry.name)
+            copied += 1
+        elif entry.is_dir():
+            dest_dir = data_dir / entry.name
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            for file_path in entry.rglob("*"):
+                if file_path.is_file() and file_path.suffix.lower() in SUPPORTED_SUFFIXES:
+                    shutil.copy2(file_path, dest_dir / file_path.name)
+                    copied += 1
+    return copied
 
 
 if __name__ == "__main__":

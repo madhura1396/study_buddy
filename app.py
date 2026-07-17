@@ -5,6 +5,7 @@ Run from the project root:
 """
 
 from datetime import date, datetime
+from pathlib import Path
 
 import streamlit as st
 
@@ -17,7 +18,13 @@ from src.drive import (
     resolve_to_files,
 )
 from src.generate import GenerationError, MissingAPIKeyError, generate_answer
-from src.ingest import UNCATEGORIZED, get_collection, run_ingestion
+from src.ingest import (
+    UNCATEGORIZED,
+    delete_document,
+    get_collection,
+    import_local_folder,
+    run_ingestion,
+)
 
 st.set_page_config(page_title="Study Buddy", page_icon="📚")
 st.title("📚 Study Buddy")
@@ -123,6 +130,25 @@ with st.sidebar:
         st.success(f"Ingested {len(uploaded_files)} file(s) into '{upload_category}'.")
         st.rerun()
 
+    st.divider()
+    st.header("Import a local folder")
+    st.caption(
+        "Point at a folder on this computer, e.g. one containing subfolders "
+        "like 'linear regression', 'logistic', 'kmeans' — each subfolder is "
+        "imported as its own category, exactly as it's laid out on disk."
+    )
+    folder_path = st.text_input("Folder path", placeholder="/Users/you/ml", key="local_folder_path")
+    if st.button("Import folder", disabled=not folder_path):
+        try:
+            with st.spinner("Copying files and ingesting..."):
+                copied = import_local_folder(Path(folder_path).expanduser())
+                run_ingestion()
+            load_ingested_docs.clear()
+            st.success(f"Imported {copied} file(s).")
+            st.rerun()
+        except (NotADirectoryError, FileNotFoundError) as e:
+            st.error(str(e))
+
 ask_tab, materials_tab = st.tabs(["💬 Ask", "📂 Study Materials"])
 
 with ask_tab:
@@ -206,3 +232,10 @@ with materials_tab:
                             st.markdown(f"- {h}")
                     else:
                         st.caption("(no section headings detected)")
+                    if st.button(
+                        "🗑️ Delete", key=f"delete_{category}_{doc['source']}"
+                    ):
+                        delete_document(category, doc["source"])
+                        load_ingested_docs.clear()
+                        st.success(f"Deleted {doc['source']}.")
+                        st.rerun()
