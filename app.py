@@ -27,6 +27,14 @@ from src.ingest import (
     import_local_folder,
     run_ingestion,
 )
+from src.quiz import (
+    GenerationFailedError,
+    build_scope_text,
+    generate_flashcards,
+    generate_mcqs,
+    get_history,
+    save_attempt,
+)
 
 st.set_page_config(page_title="Study Buddy", page_icon="📚")
 st.title("📚 Study Buddy")
@@ -95,7 +103,9 @@ def category_picker(key_prefix: str) -> str:
     return choice
 
 
-ask_tab, materials_tab, import_tab = st.tabs(["💬 Ask", "📂 Study Materials", "📥 Import"])
+ask_tab, materials_tab, import_tab, quiz_tab = st.tabs(
+    ["💬 Ask", "📂 Study Materials", "📥 Import", "🧠 Quiz"]
+)
 
 with ask_tab:
     top_col, button_col = st.columns([5, 1])
@@ -297,3 +307,170 @@ with import_tab:
             st.rerun()
         except (NotADirectoryError, FileNotFoundError) as e:
             st.error(str(e))
+
+with quiz_tab:
+    docs = load_ingested_docs()
+    if not docs:
+        st.info("No documents ingested yet. Head to the Import tab to add some.")
+    else:
+        by_category: dict[str, list[dict]] = {}
+        for doc in docs:
+            by_category.setdefault(doc["category"], []).append(doc)
+
+        if "quiz_data" not in st.session_state:
+            st.session_state.quiz_data = None
+            st.session_state.quiz_progress = None
+
+        st.subheader("Generate")
+        category = st.selectbox("Folder", sorted(by_category), key="quiz_category")
+        category_docs = by_category[category]
+        selected_sources = st.multiselect(
+            "Files", options=[d["source"] for d in category_docs], key="quiz_files"
+        )
+
+        available_headings = sorted(
+            {
+                h
+                for d in category_docs
+                if d["source"] in selected_sources
+                for h in d["headings"]
+            }
+        )
+        selected_headings = st.multiselect(
+            "Chapters (leave empty to use the whole file)",
+            options=available_headings,
+            key="quiz_chapters",
+        )
+
+        mode = st.radio("Mode", ["Multiple choice", "Flashcards"], horizontal=True)
+        count = st.slider("How many", min_value=3, max_value=15, value=5)
+
+        if st.button("Generate", disabled=not selected_sources):
+            with st.spinner("Generating from your selected material..."):
+                try:
+                    scope_text = build_scope_text(
+                        category, selected_sources, selected_headings or None
+                    )
+                    if mode == "Multiple choice":
+                        items = generate_mcqs(scope_text, n=count)
+                    else:
+                        items = generate_flashcards(scope_text, n=count)
+                except (MissingAPIKeyError, GenerationFailedError) as e:
+                    st.error(str(e))
+                    items = None
+
+            if items:
+                scope_label = f"{category} — {', '.join(selected_sources)}"
+                if selected_headings:
+                    scope_label += f" ({len(selected_headings)} chapter(s))"
+                st.session_state.quiz_data = {
+                    "kind": "mcq" if mode == "Multiple choice" else "flashcard",
+                    "items": items,
+                    "scope_label": scope_label,
+                }
+                st.session_state.quiz_progress = {
+                    "index": 0,
+                    "score": 0,
+                    "missed": [],
+                    "revealed": False,
+                    "answered": False,
+                }
+                st.rerun()
+
+        st.divider()
+
+        quiz_data = st.session_state.quiz_data
+        progress = st.session_state.quiz_progress
+        if quiz_data and progress:
+            items = quiz_data["items"]
+            i = progress["index"]
+
+            if i >= len(items):
+                st.subheader("Done!")
+                st.markdown(f"Score: **{progress['score']} / {len(items)}**")
+                if progress["missed"]:
+                    st.markdown("**Review these:**")
+                    for m in progress["missed"]:
+                        st.markdown(f"- {m}")
+                if st.button("Save & start a new quiz"):
+                    save_attempt(
+                        quiz_data["kind"],
+                        quiz_data["scope_label"],
+                        progress["score"],
+                        len(items),
+                        progress["missed"],
+                    )
+                    st.session_state.quiz_data = None
+                    st.session_state.quiz_progress = None
+                    st.rerun()
+            elif quiz_data["kind"] == "mcq":
+                item = items[i]
+                st.subheader(f"Question {i + 1} of {len(items)}")
+                st.markdown(item["question"])
+                choice = st.radio(
+                    "Answer", item["options"], key=f"mcq_choice_{i}", index=None
+                )
+
+                if not progress["answered"]:
+                    if st.button("Submit answer", disabled=choice is None):
+                        progress["answered"] = True
+                        chosen_index = item["options"].index(choice)
+                        if chosen_index == item["correct_index"]:
+                            progress["score"] += 1
+                            st.success("Correct!")
+                        else:
+                            progress["missed"].append(item["question"])
+                            correct = item["options"][item["correct_index"]]
+                            st.error(f"Not quite — the correct answer is: {correct}")
+                        st.caption(item.get("explanation", ""))
+                        st.rerun()
+                else:
+                    chosen_index = item["options"].index(choice) if choice else None
+                    if chosen_index == item["correct_index"]:
+                        st.success("Correct!")
+                    else:
+                        correct = item["options"][item["correct_index"]]
+                        st.error(f"Not quite — the correct answer is: {correct}")
+                    st.caption(item.get("explanation", ""))
+                    if st.button("Next"):
+                        progress["index"] += 1
+                        progress["answered"] = False
+                        st.rerun()
+            else:  # flashcard
+                item = items[i]
+                st.subheader(f"Card {i + 1} of {len(items)}")
+                st.markdown(f"**{item['front']}**")
+
+                if not progress["revealed"]:
+                    if st.button("Show answer"):
+                        progress["revealed"] = True
+                        st.rerun()
+                else:
+                    st.info(item["back"])
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("✅ Got it"):
+                            progress["score"] += 1
+                            progress["index"] += 1
+                            progress["revealed"] = False
+                            st.rerun()
+                    with col2:
+                        if st.button("❌ Missed it"):
+                            progress["missed"].append(item["front"])
+                            progress["index"] += 1
+                            progress["revealed"] = False
+                            st.rerun()
+
+        st.divider()
+        st.subheader("History")
+        history = get_history()
+        if not history:
+            st.caption("No past attempts yet.")
+        else:
+            for attempt in history[:10]:
+                when = datetime.fromtimestamp(attempt["timestamp"]).strftime("%b %d, %Y %I:%M %p")
+                kind_label = "Quiz" if attempt["kind"] == "mcq" else "Flashcards"
+                st.markdown(
+                    f"**{kind_label}** — {attempt['scope_label']} — "
+                    f"{attempt['score']}/{attempt['total']} — {when}"
+                )
