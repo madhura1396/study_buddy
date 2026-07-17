@@ -6,8 +6,9 @@ Run from the project root:
 
 import streamlit as st
 
+from src.drive import MissingCredentialsError, download_file, list_importable_files
 from src.generate import GenerationError, MissingAPIKeyError, generate_answer
-from src.ingest import get_collection
+from src.ingest import get_collection, run_ingestion
 
 st.set_page_config(page_title="Study Buddy", page_icon="📚")
 st.title("📚 Study Buddy")
@@ -40,6 +41,36 @@ with st.sidebar:
                         st.markdown(f"- {h}")
                 else:
                     st.caption("(no section headings detected)")
+
+    st.divider()
+    st.header("Import from Google Drive")
+    drive_search = st.text_input("Search by file name", key="drive_search")
+    if st.button("Search Drive"):
+        try:
+            st.session_state.drive_results = list_importable_files(drive_search)
+        except MissingCredentialsError as e:
+            st.error(str(e))
+        except Exception as e:
+            st.error(f"Google Drive authentication/search failed: {e}")
+
+    drive_results = st.session_state.get("drive_results", [])
+    if drive_results:
+        selected_names = st.multiselect(
+            "Files found",
+            options=[f["name"] for f in drive_results],
+        )
+        if st.button("Import selected", disabled=not selected_names):
+            with st.spinner("Downloading and ingesting..."):
+                for f in drive_results:
+                    if f["name"] in selected_names:
+                        download_file(f)
+                run_ingestion()
+            st.session_state.drive_results = []
+            load_ingested_chapters.clear()
+            st.success(f"Imported {len(selected_names)} file(s).")
+            st.rerun()
+    elif "drive_results" in st.session_state:
+        st.caption("No matching files found.")
 
 # Chat-style history in session_state: st.text_input previously left the
 # question un-cleared after answering, and Streamlit only reruns a script

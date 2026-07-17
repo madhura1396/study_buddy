@@ -18,3 +18,7 @@ CHUNK_OVERLAP = 100
 
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+
+GOOGLE_CLIENT_SECRET_PATH = PROJECT_ROOT / "client_secret.json"
+GOOGLE_TOKEN_PATH = PROJECT_ROOT / "token.json"
+GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
