@@ -172,15 +172,24 @@ with materials_tab:
         for category in sorted(by_category, key=lambda c: (c == UNCATEGORIZED, c)):
             category_docs = by_category[category]
             with st.expander(f"📁 {category} ({len(category_docs)})"):
+                selected_for_deletion = []
                 for doc in category_docs:
-                    st.markdown(f"**{doc['source']}**")
-                    if doc["headings"]:
-                        for h in doc["headings"]:
-                            st.markdown(f"- {h}")
-                    else:
-                        st.caption("(no section headings detected)")
-                    action_col1, action_col2 = st.columns(2)
-                    with action_col1:
+                    check_col, info_col = st.columns([1, 9])
+                    with check_col:
+                        checked = st.checkbox(
+                            "Select",
+                            key=f"select_{category}_{doc['source']}",
+                            label_visibility="collapsed",
+                        )
+                        if checked:
+                            selected_for_deletion.append(doc["source"])
+                    with info_col:
+                        st.markdown(f"**{doc['source']}**")
+                        if doc["headings"]:
+                            for h in doc["headings"]:
+                                st.markdown(f"- {h}")
+                        else:
+                            st.caption("(no section headings detected)")
                         cached_url = get_cached_drive_link(category, doc["source"])
                         if cached_url:
                             st.link_button("🔗 Open in Google Docs", cached_url)
@@ -193,13 +202,18 @@ with materials_tab:
                                     local_file_path(category, doc["source"]), category
                                 )
                             st.link_button("🔗 Open in Google Docs", url)
-                    with action_col2:
-                        if st.button("🗑️ Delete", key=f"delete_{category}_{doc['source']}"):
-                            delete_document(category, doc["source"])
-                            load_ingested_docs.clear()
-                            st.success(f"Deleted {doc['source']}.")
-                            st.rerun()
                     st.divider()
+
+                if st.button(
+                    f"🗑️ Delete selected ({len(selected_for_deletion)})",
+                    key=f"delete_selected_{category}",
+                    disabled=not selected_for_deletion,
+                ):
+                    for source in selected_for_deletion:
+                        delete_document(category, source)
+                    load_ingested_docs.clear()
+                    st.success(f"Deleted {len(selected_for_deletion)} file(s).")
+                    st.rerun()
 
 with import_tab:
     st.subheader("Import from Google Drive")
