@@ -3,7 +3,7 @@
 from src.ingest import get_collection
 
 
-def retrieve(query: str, top_k: int = 5) -> list[dict]:
+def retrieve(query: str, top_k: int = 8) -> list[dict]:
     collection = get_collection()
     results = collection.query(query_texts=[query], n_results=top_k)
 

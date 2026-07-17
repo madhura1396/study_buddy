@@ -40,7 +40,7 @@ def build_prompt(question: str, hits: list[dict]) -> str:
     return f"Context:\n{context}\n\nQuestion: {question}"
 
 
-def generate_answer(question: str, top_k: int = 5) -> dict:
+def generate_answer(question: str, top_k: int = 8) -> dict:
     hits = retrieve(question, top_k=top_k)
     if not hits:
         return {

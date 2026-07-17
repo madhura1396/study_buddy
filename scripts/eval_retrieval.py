@@ -24,7 +24,7 @@ def load_cases() -> list[dict]:
         return json.load(f)
 
 
-def run_eval(top_k: int = 5) -> None:
+def run_eval(top_k: int = 8) -> None:
     cases = load_cases()
     if not cases:
         print(f"No eval cases found in {EVAL_CASES_PATH}")

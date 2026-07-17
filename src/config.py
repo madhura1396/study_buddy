@@ -11,7 +11,7 @@ DATA_DIR = PROJECT_ROOT / "data" / "sample_docs"
 CHROMA_DIR = PROJECT_ROOT / "chroma_db"
 COLLECTION_NAME = "study_materials"
 
-EMBEDDING_MODEL_NAME = "all-MiniLM-L6-v2"
+EMBEDDING_MODEL_NAME = "all-mpnet-base-v2"
 
 CHUNK_SIZE = 500
 CHUNK_OVERLAP = 100
