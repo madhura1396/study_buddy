@@ -186,8 +186,13 @@ with materials_tab:
                     with info_col:
                         st.markdown(f"**{doc['source']}**")
                         if doc["headings"]:
-                            for h in doc["headings"]:
-                                st.markdown(f"- {h}")
+                            show_chapters = st.toggle(
+                                f"📖 Show chapters ({len(doc['headings'])})",
+                                key=f"chapters_{category}_{doc['source']}",
+                            )
+                            if show_chapters:
+                                for h in doc["headings"]:
+                                    st.markdown(f"- {h}")
                         else:
                             st.caption("(no section headings detected)")
                         cached_url = get_cached_drive_link(category, doc["source"])
