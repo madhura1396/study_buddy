@@ -386,3 +386,53 @@ the whole `chroma_db/` directory out from under itself; deletes go through
 `delete_document()`, which only ever removes matching ids incrementally).
 Worth remembering: any time `chroma_db/` gets wiped and rebuilt from
 outside the running app process, the app needs a restart afterward.
+
+---
+
+## 14. "Be more thorough" made answers less faithful to sources — and the eval measuring it was itself unreliable
+
+**Problem:** after adding `scripts/eval_answers.py` (an LLM-judge eval
+scoring generated answers on quality 1–5 and citation faithfulness), the
+first run showed 9/13 (69%) faithful — 4 answers made claims their cited
+chunks didn't actually support (e.g. asserting a specific direction for a
+Durbin-Watson statistic value the source left unspecified; generalizing an
+"underfitting" claim from a linear-regression source to decision trees/
+logistic regression without that generalization being in the text).
+Tightening `SYSTEM_PROMPT` to explicitly forbid filling gaps or
+generalizing beyond the context, then re-running, showed faithfulness drop
+further to 5/13 (38%) — the opposite of the intended fix.
+
+**Root cause, two layers:** (1) the underlying issue was real — the
+earlier prompt change asking for "thorough... detail, examples, or
+nuance" pushed the model toward confidently elaborating past what the
+retrieved context actually stated, a classic verbosity/faithfulness
+tradeoff. (2) But the *measurement* of whether the fix helped was invalid:
+`generate_answer()` ran at `temperature=0.2`, so each eval run regenerated
+different answer wording from scratch — the 69%-to-38% comparison wasn't a
+controlled before/after on the same output, it was two different random
+samples. Some of the second run's "unfaithful" flags were minor nitpicks
+(a number range off by a decimal, a fact present in the sources but cited
+to the wrong bracket number) rather than fabrication, suggesting the LLM
+judge itself has some inherent looseness/inconsistency in what it flags
+run to run, on top of the answer text changing.
+
+**Fix:** set `temperature=0` in `generate_answer()`'s Groq call, making
+answer generation deterministic — the same question now always produces
+the same answer, so re-running the eval after a future prompt change is an
+actual controlled comparison instead of noise. Left the faithfulness-
+tightened system prompt in place since the underlying concern (verbose
+answers drifting from sources) is real, but did not claim the 38% number
+as proof the tightening helped, since it was measured before the fix.
+
+**Future enhancement:** re-run `scripts/eval_answers.py` now that
+generation is deterministic to get a trustworthy faithfulness baseline,
+then compare against future prompt changes properly. Also worth improving
+the eval itself: (1) the quality score was a flat 5/5 across all 13 cases
+both runs — the rubric (a single short "must-cover" phrase per case,
+reused from the retrieval eval) is too easy to satisfy and isn't
+discriminating; it needs real per-question grading criteria, not an
+auto-derived proxy. (2) the judge itself was inconsistent about what
+counts as "unsupported" (e.g. penalizing a citation-attribution technicality
+as harshly as an outright invented claim) — a rubric with severity levels,
+or splitting "wrong citation index" from "fabricated claim" as separate
+checks, would make faithfulness scoring more actionable.
