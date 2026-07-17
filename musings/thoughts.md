@@ -348,3 +348,41 @@ whether topically-similar-but-distinct documents are being disambiguated
 correctly (e.g. "linear regression's normality assumption" vs "the normal
 distribution in general"), not just whether *a* relevant chunk shows up
 somewhere in the top-k.
+
+---
+
+## 13. "attempt to write a readonly database" from a long-running Streamlit process
+
+**Problem:** clicking "Import folder" in the running app threw
+`chromadb.errors.InternalError: ... attempt to write a readonly database`
+from inside `collection.upsert()` in `run_ingestion()`. The file and
+directory permissions on `chroma_db/` were completely normal
+(`-rw-r--r--`, correct owner), there was no stale `.sqlite3-journal` or
+`.sqlite3-wal` lock file, and disk space was fine — none of the usual
+SQLite-permission suspects applied.
+
+**Root cause:** the Streamlit server process had been running continuously
+across several rounds of me directly running `rm -rf chroma_db && python -m
+src.ingest` from separate one-off scripts while testing (the local-folder
+import and delete-document features). `chromadb.PersistentClient`
+apparently caches some connection/file-handle state at the process level;
+once the on-disk files it originally opened were deleted and replaced by a
+completely new set of files, the long-running process's handle became
+stale, and the Rust storage backend surfaced that mismatch as a generic
+"readonly database" error rather than something clearer like "underlying
+file changed." Confirmed by reproducing the exact same `run_ingestion()`
+call from a brand-new Python process, which succeeded immediately with no
+error — proving the database itself was never actually readonly.
+
+**Fix:** kill the stale Streamlit process and start a new one; a fresh
+process opens a clean connection to whatever is currently on disk.
+
+**Future enhancement:** this is a sharp edge specifically created by doing
+direct filesystem surgery on `chroma_db/` (rm/reingest) while a long-lived
+process holds it open — a risk mostly introduced by iterative testing
+during development, not by end-user usage (a user's own actions all go
+through the same long-running process, which never deletes and recreates
+the whole `chroma_db/` directory out from under itself; deletes go through
+`delete_document()`, which only ever removes matching ids incrementally).
+Worth remembering: any time `chroma_db/` gets wiped and rebuilt from
+outside the running app process, the app needs a restart afterward.
