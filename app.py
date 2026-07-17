@@ -14,6 +14,8 @@ from src.drive import (
     FOLDER_MIME_TYPE,
     MissingCredentialsError,
     download_file,
+    get_cached_drive_link,
+    get_or_create_drive_link,
     list_importable_files,
     resolve_to_files,
 )
@@ -67,6 +69,12 @@ def render_sources(numbered_hits: list[tuple[int, dict]]) -> None:
             st.markdown(f"**{label}**")
             st.text(hit["text"])
             st.divider()
+
+
+def local_file_path(category: str, source: str) -> Path:
+    if category == UNCATEGORIZED:
+        return DATA_DIR / source
+    return DATA_DIR / category / source
 
 
 def existing_categories() -> list[str]:
@@ -171,11 +179,26 @@ with materials_tab:
                             st.markdown(f"- {h}")
                     else:
                         st.caption("(no section headings detected)")
-                    if st.button("🗑️ Delete", key=f"delete_{category}_{doc['source']}"):
-                        delete_document(category, doc["source"])
-                        load_ingested_docs.clear()
-                        st.success(f"Deleted {doc['source']}.")
-                        st.rerun()
+                    action_col1, action_col2 = st.columns(2)
+                    with action_col1:
+                        cached_url = get_cached_drive_link(category, doc["source"])
+                        if cached_url:
+                            st.link_button("🔗 Open in Google Docs", cached_url)
+                        elif st.button(
+                            "⬆️ Upload & open in Google Docs",
+                            key=f"drive_link_{category}_{doc['source']}",
+                        ):
+                            with st.spinner("Uploading to Google Drive..."):
+                                url = get_or_create_drive_link(
+                                    local_file_path(category, doc["source"]), category
+                                )
+                            st.link_button("🔗 Open in Google Docs", url)
+                    with action_col2:
+                        if st.button("🗑️ Delete", key=f"delete_{category}_{doc['source']}"):
+                            delete_document(category, doc["source"])
+                            load_ingested_docs.clear()
+                            st.success(f"Deleted {doc['source']}.")
+                            st.rerun()
                     st.divider()
 
 with import_tab:

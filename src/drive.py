@@ -5,6 +5,7 @@ have no downloadable binary of their own and must be exported via the API
 (here, to .docx) before src/ingest.py's readers can handle them.
 """
 
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -12,7 +13,7 @@ from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 
 from src.config import (
     DATA_DIR,
@@ -20,6 +21,8 @@ from src.config import (
     GOOGLE_DRIVE_SCOPES,
     GOOGLE_TOKEN_PATH,
 )
+
+DRIVE_LINKS_PATH = DATA_DIR / ".drive_links.json"
 
 GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
 GOOGLE_DOC_EXPORT_MIME_TYPE = (
@@ -54,6 +57,12 @@ def get_drive_service():
     creds = None
     if GOOGLE_TOKEN_PATH.exists():
         creds = Credentials.from_authorized_user_file(str(GOOGLE_TOKEN_PATH), GOOGLE_DRIVE_SCOPES)
+        # A cached token from before GOOGLE_DRIVE_SCOPES grew (e.g. before
+        # drive.file was added for uploads) is "valid" but missing scopes it
+        # never consented to — re-authenticate rather than let API calls
+        # fail later with an opaque 403.
+        if creds and not set(GOOGLE_DRIVE_SCOPES).issubset(set(creds.scopes or [])):
+            creds = None
 
     if not creds or not creds.valid:
         if creds and creds.expired and creds.refresh_token:
@@ -148,3 +157,73 @@ def download_file(file: dict, dest_dir: Path = DATA_DIR) -> Path:
             _, done = downloader.next_chunk()
 
     return dest_path
+
+
+def _load_link_registry() -> dict:
+    if not DRIVE_LINKS_PATH.exists():
+        return {}
+    return json.loads(DRIVE_LINKS_PATH.read_text())
+
+
+def _save_link_registry(registry: dict) -> None:
+    DRIVE_LINKS_PATH.write_text(json.dumps(registry, indent=2))
+
+
+def get_cached_drive_link(category: str, source: str) -> Optional[str]:
+    """Return a previously-uploaded Google Doc's URL for this file, if any,
+    without hitting the Drive API."""
+    return _load_link_registry().get(f"{category}/{source}")
+
+
+def _find_or_create_drive_folder(name: str) -> str:
+    service = get_drive_service()
+    results = (
+        service.files()
+        .list(
+            q=f"name='{name}' and mimeType='{FOLDER_MIME_TYPE}' and trashed=false",
+            fields="files(id)",
+            pageSize=1,
+        )
+        .execute()
+    )
+    existing = results.get("files", [])
+    if existing:
+        return existing[0]["id"]
+
+    created = (
+        service.files()
+        .create(body={"name": name, "mimeType": FOLDER_MIME_TYPE}, fields="id")
+        .execute()
+    )
+    return created["id"]
+
+
+def get_or_create_drive_link(local_path: Path, category: str) -> str:
+    """Return a Google Docs URL for a local file, uploading (and converting)
+    it to Drive the first time and caching the result thereafter so repeat
+    clicks don't create duplicate Drive copies. Files are placed in a Drive
+    folder named after their local category, created if it doesn't exist."""
+    cache_key = f"{category}/{local_path.name}"
+    cached = get_cached_drive_link(category, local_path.name)
+    if cached:
+        return cached
+
+    service = get_drive_service()
+    folder_id = _find_or_create_drive_folder(category)
+    media = MediaFileUpload(str(local_path), resumable=False)
+    metadata = {
+        "name": local_path.stem,
+        "mimeType": GOOGLE_DOC_MIME_TYPE,
+        "parents": [folder_id],
+    }
+    created = (
+        service.files()
+        .create(body=metadata, media_body=media, fields="webViewLink")
+        .execute()
+    )
+    url = created["webViewLink"]
+
+    registry = _load_link_registry()
+    registry[cache_key] = url
+    _save_link_registry(registry)
+    return url

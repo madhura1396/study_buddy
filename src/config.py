@@ -21,4 +21,11 @@ GROQ_MODEL = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 GOOGLE_CLIENT_SECRET_PATH = PROJECT_ROOT / "client_secret.json"
 GOOGLE_TOKEN_PATH = PROJECT_ROOT / "token.json"
-GOOGLE_DRIVE_SCOPES = ["https://www.googleapis.com/auth/drive.readonly"]
+# drive.readonly: browse/search/download the user's existing Drive files.
+# drive.file: create/update files this app itself creates (used to upload
+# study docs as Google Docs) — deliberately not the broader "drive" scope,
+# which would grant write access to every file in the user's Drive.
+GOOGLE_DRIVE_SCOPES = [
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.file",
+]
