@@ -220,3 +220,68 @@ addition. Also worth considering: passing recent conversation turns into
 second one?" can resolve pronouns/references against prior turns, since
 right now each question is answered in isolation with no memory of the
 conversation.
+
+---
+
+## 9. Switching embedding models revealed a second, hidden top_k default
+
+**Problem:** after swapping `EMBEDDING_MODEL_NAME` from `all-MiniLM-L6-v2` to
+`all-mpnet-base-v2` (the future enhancement flagged in #7) and re-ingesting,
+`scripts/eval_retrieval.py` still reported 77% (10/13) — no visible
+improvement, even though the stronger model should have helped.
+
+**Root cause:** two separate things, stacked:
+1. mpnet did genuinely fix one failure (the "predictor variables" inference
+   case) but *introduced* a different near-miss ("linearity assumption"
+   dropped to rank 6, just outside `top_k=5`) — so the headline score didn't
+   move even though the underlying ranking quality had changed.
+2. `run_eval()` in `scripts/eval_retrieval.py` had its own hardcoded
+   `top_k: int = 5` default, completely independent of whatever default
+   `retrieve()` itself used. Bumping `retrieve()`'s default earlier (in
+   problem area around structure-aware chunking) had no effect on eval
+   results at all, because the eval script never picked it up — it was
+   silently testing against a stale `top_k` the whole time.
+
+**Fix:** raised `retrieve()`'s and `generate_answer()`'s default `top_k` from
+5 to 8 (mpnet's near-misses were landing around rank 6, so 8 gives margin),
+and fixed `run_eval()`'s default to match. Recall moved to 85% (11/13) —
+our second-best result overall, one point of failure being the same
+persistent math-notation chunk from #7.
+
+**Future enhancement:** having the same conceptual parameter (`top_k`)
+duplicated as independent defaults in three places (`retrieve()`,
+`generate_answer()`, `run_eval()`) is a footgun — it's easy to change one
+and assume the others followed. If this keeps needing to move, it should
+live in `src/config.py` as `DEFAULT_TOP_K` and be imported everywhere,
+rather than being three separately-maintained magic numbers.
+
+---
+
+## 10. git broke machine-wide — not a project bug, but blocked every push
+
+**Problem:** mid-session, every `git` command (even `git status`) started
+failing with `Error loading required libraries ... unable to locate
+xcodebuild`, blocking commits and pushes entirely.
+
+**Root cause:** on macOS, `/usr/bin/git` isn't a real standalone binary — it
+resolves through Apple's active developer tools path (`xcode-select`) before
+running. This machine has both a full Xcode.app and the standalone Command
+Line Tools installed, and `xcode-select` was pointed at the Xcode.app copy,
+which had a corrupted library (`libxcodebuildLoader.dylib` failing to load —
+likely from an interrupted Xcode update). Since `git` needs that path to
+resolve successfully before it can do anything, every git command failed
+before reaching the actual command.
+
+**Fix:** `sudo xcode-select --switch /Library/Developer/CommandLineTools` —
+pointed the active developer directory at the lighter, standalone CLT
+install instead of the broken Xcode.app, without touching or deleting
+anything inside Xcode.app itself (considered and rejected deleting the
+corrupted framework file directly — too destructive/uncertain a fix for a
+large interlinked app bundle, and might not have even resolved the
+`xcodebuild` lookup failure itself).
+
+**Future enhancement:** none needed for this project specifically — this
+was environment/OS-level, not something the codebase can guard against.
+Worth remembering as a general lesson: if `git` ever fails with an
+Xcode-flavored error on macOS, check `xcode-select -p` before assuming the
+repo or git config is the problem.
