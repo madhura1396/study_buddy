@@ -41,26 +41,52 @@ with st.sidebar:
                 else:
                     st.caption("(no section headings detected)")
 
-question = st.text_input("Ask a question", placeholder="e.g. What is the linearity assumption?")
+# Chat-style history in session_state: st.text_input previously left the
+# question un-cleared after answering, and Streamlit only reruns a script
+# when a widget's *value* changes — so re-submitting an unedited question,
+# or wanting to ask a fresh one without manually clearing the box, silently
+# did nothing. st.chat_input auto-clears after every submission and always
+# triggers a rerun, which is what makes "ask the next question" work.
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-if question:
-    with st.spinner("Retrieving context and generating an answer..."):
-        try:
-            result = generate_answer(question)
-        except MissingAPIKeyError as e:
-            st.error(str(e))
-            st.stop()
-        except GenerationError as e:
-            st.error(str(e))
-            st.stop()
-
-    st.markdown(result["answer"])
-
-    if result["sources"]:
-        st.subheader("Sources")
-        for i, hit in enumerate(result["hits"], start=1):
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
+        for i, hit in message.get("hits", []):
             label = f"[{i}] {hit['source']} (chunk {hit['chunk_index']})"
             if hit["heading"]:
                 label += f" — {hit['heading']}"
             with st.expander(label):
                 st.text(hit["text"])
+
+question = st.chat_input("Ask a question, e.g. What is the linearity assumption?")
+
+if question:
+    st.session_state.messages.append({"role": "user", "content": question})
+    with st.chat_message("user"):
+        st.markdown(question)
+
+    with st.chat_message("assistant"):
+        with st.spinner("Retrieving context and generating an answer..."):
+            try:
+                result = generate_answer(question)
+            except MissingAPIKeyError as e:
+                st.error(str(e))
+                st.stop()
+            except GenerationError as e:
+                st.error(str(e))
+                st.stop()
+
+        st.markdown(result["answer"])
+        numbered_hits = list(enumerate(result["hits"], start=1))
+        for i, hit in numbered_hits:
+            label = f"[{i}] {hit['source']} (chunk {hit['chunk_index']})"
+            if hit["heading"]:
+                label += f" — {hit['heading']}"
+            with st.expander(label):
+                st.text(hit["text"])
+
+    st.session_state.messages.append(
+        {"role": "assistant", "content": result["answer"], "hits": numbered_hits}
+    )

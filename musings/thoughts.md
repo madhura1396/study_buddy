@@ -186,3 +186,37 @@ target was rank 12, the other wasn't found even at rank 30).
    the two above) swings the score by ~8 points. A larger, more
    representative set would make it clearer whether these are edge cases or
    a systemic pattern worth prioritizing.
+
+---
+
+## 8. Streamlit app: couldn't ask a second question
+
+**Problem:** in `app.py`, after asking one question and getting an answer,
+typing a new question into the same input box and pressing Enter appeared to
+do nothing — no new answer, no visible change at all.
+
+**Root cause:** the input was `st.text_input`, which does not clear itself
+after the app re-renders. Streamlit only re-runs the script when a widget's
+*value* changes, not merely when Enter is pressed. So the box still held the
+first question's text; unless you manually selected-all and retyped a
+genuinely different string, Streamlit saw "no change" and never re-ran
+`generate_answer()` at all. This wasn't a backend/retrieval bug — the whole
+Q&A pipeline was working fine, the UI just never asked it to run again.
+
+**Fix:** switched to `st.chat_input`, which is designed for exactly this —
+it auto-clears after every submission and reliably triggers a rerun each
+time, regardless of whether the new text happens to differ from the old.
+Also added a `st.session_state`-backed message history so previous
+questions/answers/sources stay visible as a running conversation instead of
+being overwritten each turn, which is the more natural mental model for
+"keep asking follow-ups."
+
+**Future enhancement:** the current history keeps growing unbounded for the
+lifetime of the browser session (cleared only on page refresh) — fine for a
+personal study tool, but if this were shared or long-running, a "clear
+conversation" button or a cap on stored turns would be a reasonable
+addition. Also worth considering: passing recent conversation turns into
+`generate_answer()`'s prompt so follow-up questions like "what about the
+second one?" can resolve pronouns/references against prior turns, since
+right now each question is answered in isolation with no memory of the
+conversation.
