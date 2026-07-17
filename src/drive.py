@@ -24,6 +24,7 @@ GOOGLE_DOC_MIME_TYPE = "application/vnd.google-apps.document"
 GOOGLE_DOC_EXPORT_MIME_TYPE = (
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 )
+FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
 # No PDF here: src/ingest.py's readers only cover .txt/.docx (PDF support was
 # dropped earlier since the project has no PDF study materials) — listing PDFs
 # here would let them be "imported" and then silently skipped at ingestion.
@@ -67,10 +68,12 @@ def get_drive_service():
 
 
 def list_importable_files(query: str = "") -> list[dict]:
-    """Return [{id, name, mimeType}, ...] for Drive files this app can import,
-    optionally filtered by a name substring."""
+    """Return [{id, name, mimeType}, ...] for Drive files and folders matching
+    a name substring. Folders are included so a search result can be a whole
+    folder of study docs, not just individual files; list_folder_contents()
+    expands a folder into its importable files at import time."""
     service = get_drive_service()
-    mime_filter = " or ".join(f"mimeType='{m}'" for m in SUPPORTED_MIME_TYPES)
+    mime_filter = " or ".join(f"mimeType='{m}'" for m in [*SUPPORTED_MIME_TYPES, FOLDER_MIME_TYPE])
     q = f"({mime_filter}) and trashed=false"
     if query:
         q += f" and name contains '{query}'"
@@ -81,6 +84,39 @@ def list_importable_files(query: str = "") -> list[dict]:
         .execute()
     )
     return results.get("files", [])
+
+
+def list_folder_contents(folder_id: str) -> list[dict]:
+    """Return the importable files (recursing into subfolders) inside a Drive folder."""
+    service = get_drive_service()
+    results = (
+        service.files()
+        .list(
+            q=f"'{folder_id}' in parents and trashed=false",
+            fields="files(id, name, mimeType)",
+            pageSize=200,
+        )
+        .execute()
+    )
+    entries = results.get("files", [])
+
+    files = [f for f in entries if f["mimeType"] in SUPPORTED_MIME_TYPES]
+    for subfolder in [f for f in entries if f["mimeType"] == FOLDER_MIME_TYPE]:
+        files.extend(list_folder_contents(subfolder["id"]))
+    return files
+
+
+def resolve_to_files(entries: list[dict]) -> list[dict]:
+    """Expand any folders in a selection into their contained files, leaving
+    plain files untouched. Used right before download so folder selections
+    "just work" the same as file selections."""
+    files = []
+    for entry in entries:
+        if entry["mimeType"] == FOLDER_MIME_TYPE:
+            files.extend(list_folder_contents(entry["id"]))
+        else:
+            files.append(entry)
+    return files
 
 
 def _dest_filename(name: str, mime_type: str) -> str:

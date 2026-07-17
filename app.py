@@ -6,7 +6,14 @@ Run from the project root:
 
 import streamlit as st
 
-from src.drive import MissingCredentialsError, download_file, list_importable_files
+from src.drive import (
+    FOLDER_MIME_TYPE,
+    MissingCredentialsError,
+    download_file,
+    list_importable_files,
+    resolve_to_files,
+)
+from src.config import DATA_DIR
 from src.generate import GenerationError, MissingAPIKeyError, generate_answer
 from src.ingest import get_collection, run_ingestion
 
@@ -55,22 +62,42 @@ with st.sidebar:
 
     drive_results = st.session_state.get("drive_results", [])
     if drive_results:
-        selected_names = st.multiselect(
-            "Files found",
-            options=[f["name"] for f in drive_results],
+
+        def _label(f: dict) -> str:
+            return f"📁 {f['name']}" if f["mimeType"] == FOLDER_MIME_TYPE else f["name"]
+
+        labels_by_name = {_label(f): f for f in drive_results}
+        selected_labels = st.multiselect(
+            "Files & folders found (folders import everything inside them)",
+            options=list(labels_by_name.keys()),
         )
-        if st.button("Import selected", disabled=not selected_names):
-            with st.spinner("Downloading and ingesting..."):
-                for f in drive_results:
-                    if f["name"] in selected_names:
-                        download_file(f)
+        if st.button("Import selected", disabled=not selected_labels):
+            selected_entries = [labels_by_name[label] for label in selected_labels]
+            with st.spinner("Resolving folders, downloading, and ingesting..."):
+                files_to_import = resolve_to_files(selected_entries)
+                for f in files_to_import:
+                    download_file(f)
                 run_ingestion()
             st.session_state.drive_results = []
             load_ingested_chapters.clear()
-            st.success(f"Imported {len(selected_names)} file(s).")
+            st.success(f"Imported {len(files_to_import)} file(s).")
             st.rerun()
     elif "drive_results" in st.session_state:
         st.caption("No matching files found.")
+
+    st.divider()
+    st.header("Upload from your computer")
+    uploaded_files = st.file_uploader(
+        "Upload .txt or .docx files", type=["txt", "docx"], accept_multiple_files=True
+    )
+    if uploaded_files and st.button("Ingest uploaded files"):
+        with st.spinner("Saving and ingesting..."):
+            for uploaded in uploaded_files:
+                (DATA_DIR / uploaded.name).write_bytes(uploaded.getvalue())
+            run_ingestion()
+        load_ingested_chapters.clear()
+        st.success(f"Ingested {len(uploaded_files)} file(s).")
+        st.rerun()
 
 # Chat-style history in session_state: st.text_input previously left the
 # question un-cleared after answering, and Streamlit only reruns a script
