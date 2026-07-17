@@ -6,6 +6,7 @@ have no downloadable binary of their own and must be exported via the API
 """
 
 from pathlib import Path
+from typing import Optional
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -106,16 +107,19 @@ def list_folder_contents(folder_id: str) -> list[dict]:
     return files
 
 
-def resolve_to_files(entries: list[dict]) -> list[dict]:
-    """Expand any folders in a selection into their contained files, leaving
-    plain files untouched. Used right before download so folder selections
-    "just work" the same as file selections."""
-    files = []
+def resolve_to_files(entries: list[dict]) -> list[tuple[dict, Optional[str]]]:
+    """Expand any folders in a selection into their contained files, pairing
+    each resulting file with a category: the Drive folder's name if it came
+    from one, or None if it was selected directly (caller decides the
+    category for plain file selections). Used right before download so
+    folder selections "just work" the same as file selections, while
+    preserving the folder's name as the local category."""
+    files: list[tuple[dict, Optional[str]]] = []
     for entry in entries:
         if entry["mimeType"] == FOLDER_MIME_TYPE:
-            files.extend(list_folder_contents(entry["id"]))
+            files.extend((f, entry["name"]) for f in list_folder_contents(entry["id"]))
         else:
-            files.append(entry)
+            files.append((entry, None))
     return files
 
 

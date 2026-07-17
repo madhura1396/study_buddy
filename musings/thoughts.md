@@ -285,3 +285,66 @@ was environment/OS-level, not something the codebase can guard against.
 Worth remembering as a general lesson: if `git` ever fails with an
 Xcode-flavored error on macOS, check `xcode-select -p` before assuming the
 repo or git config is the problem.
+
+---
+
+## 11. Folder categorization crashed the app: `X | None` on Python 3.9
+
+**Problem:** after adding `resolve_to_files()`'s return type annotation
+`list[tuple[dict, str | None]]` (part of the category/folder-import
+feature), the whole Streamlit app failed to even load — `TypeError:
+unsupported operand type(s) for |: 'type' and 'NoneType'`, raised at import
+time, before any app code ran.
+
+**Root cause:** the `X | Y` union type syntax (PEP 604) is only evaluated
+lazily (and thus safe) in Python 3.10+, or on 3.9 with `from __future__
+import annotations` at the top of the file. This project's `.venv` runs
+Python 3.9 (already flagged as past end-of-life when we installed the
+Google API client libraries) without that future-import, so the `|`
+operator tried to actually execute as a runtime expression between two
+type objects — which `type` doesn't support — and crashed on the `def`
+line itself.
+
+**Fix:** used `typing.Optional[str]` instead of `str | None` in
+`src/drive.py`. Grepped the rest of `src/*.py` and `app.py` for the same
+pattern first to confirm it was the only occurrence.
+
+**Future enhancement:** this class of bug is easy to reintroduce since `X |
+None` is the more common style to type today and looks correct in an
+editor with a modern Python configured. Either add `from __future__ import
+annotations` to every module (cheapest, makes the modern syntax safe
+everywhere), or — the more durable fix — upgrade the project off Python
+3.9, which is already past its official end-of-life per the warnings
+`google-auth` prints on every import.
+
+---
+
+## 12. Adding more study docs quietly dropped eval recall from 85% to 69%
+
+**Problem:** after the user added 7 more real study documents (probability
+distributions, Bayes' theorem, MLE, etc.) on top of the original 4
+linear-regression docs, `scripts/eval_retrieval.py` dropped from 85%
+(11/13) to 69% (9/13) — with no chunking or retrieval code changed at all.
+
+**Root cause:** not a bug — the new docs are topically adjacent to the
+original eval questions. Queries like "what does it mean for errors to be
+normally distributed" now have to compete against `distributions_reference_
+guide.docx` and `random_variables_to_ml.docx`, which are *legitimately*
+about normal distributions (just not in the linear-regression-assumptions
+sense the eval question intends), and rank highly on shared vocabulary
+("normal", "distribution"). `top_k=8` isn't enough headroom once the corpus
+covers more overlapping ground.
+
+**Fix:** none applied — this is expected behavior as the corpus grows, not
+a defect in the categorization feature that was actually being built when
+this was noticed. Flagged rather than "fixed" by further inflating `top_k`,
+since that's treating a symptom (this eval set is narrow and now
+undersized relative to the corpus) rather than a cause.
+
+**Future enhancement:** this is the clearest sign yet (see also problem
+#2's future note) that the 13-case eval set needs to grow alongside the
+document corpus — it should include questions that specifically probe
+whether topically-similar-but-distinct documents are being disambiguated
+correctly (e.g. "linear regression's normality assumption" vs "the normal
+distribution in general"), not just whether *a* relevant chunk shows up
+somewhere in the top-k.

@@ -1,4 +1,12 @@
-"""Read files from DATA_DIR, chunk them, embed them, and store in ChromaDB."""
+"""Read files from DATA_DIR (including subfolders), chunk them, embed them,
+and store in ChromaDB.
+
+Files may live directly in DATA_DIR or in a subfolder, e.g.
+DATA_DIR/Linear Regression/notes.docx. A file's subfolder name becomes its
+"category" metadata; files directly in DATA_DIR are grouped under
+"Uncategorized". A file's modification time becomes "uploaded_at" metadata,
+letting the UI show recently-added files first.
+"""
 
 import re
 from pathlib import Path
@@ -19,6 +27,7 @@ from src.config import (
 
 MD_HEADER_RE = re.compile(r"^(#{1,6})\s+(.*)")
 DOCX_HEADING_LEVEL_RE = re.compile(r"Heading (\d+)")
+UNCATEGORIZED = "Uncategorized"
 
 
 def parse_txt_sections(path: Path) -> list[dict]:
@@ -60,17 +69,31 @@ def parse_docx_sections(path: Path) -> list[dict]:
 
 
 def load_documents(data_dir: Path = DATA_DIR) -> list[dict]:
-    """Return a list of {"source": ..., "sections": [{"heading", "text"}, ...]}
-    for every supported file."""
+    """Return a list of {"source", "category", "uploaded_at", "rel_path",
+    "sections": [{"heading", "text"}, ...]} for every supported file found
+    anywhere under data_dir, including subfolders."""
     parsers = {".txt": parse_txt_sections, ".docx": parse_docx_sections}
     documents = []
-    for path in sorted(data_dir.iterdir()):
+    for path in sorted(data_dir.rglob("*")):
+        if not path.is_file():
+            continue
         parser = parsers.get(path.suffix.lower())
         if parser is None:
             continue
         sections = [s for s in parser(path) if s["text"].strip()]
-        if sections:
-            documents.append({"source": path.name, "sections": sections})
+        if not sections:
+            continue
+        rel_path = path.relative_to(data_dir)
+        category = rel_path.parent.as_posix() if rel_path.parent != Path(".") else UNCATEGORIZED
+        documents.append(
+            {
+                "source": path.name,
+                "category": category,
+                "uploaded_at": path.stat().st_mtime,
+                "rel_path": rel_path.as_posix(),
+                "sections": sections,
+            }
+        )
     return documents
 
 
@@ -94,9 +117,11 @@ def chunk_documents(documents: list[dict]) -> list[dict]:
                 stored_text = f"Section: {heading}\n{piece}" if heading else piece
                 chunks.append(
                     {
-                        "id": f"{doc['source']}::chunk{chunk_index}",
+                        "id": f"{doc['rel_path']}::chunk{chunk_index}",
                         "text": stored_text,
                         "source": doc["source"],
+                        "category": doc["category"],
+                        "uploaded_at": doc["uploaded_at"],
                         "chunk_index": chunk_index,
                         "heading": heading,
                     }
@@ -127,7 +152,13 @@ def run_ingestion() -> int:
         ids=[c["id"] for c in chunks],
         documents=[c["text"] for c in chunks],
         metadatas=[
-            {"source": c["source"], "chunk_index": c["chunk_index"], "heading": c["heading"]}
+            {
+                "source": c["source"],
+                "chunk_index": c["chunk_index"],
+                "heading": c["heading"],
+                "category": c["category"],
+                "uploaded_at": c["uploaded_at"],
+            }
             for c in chunks
         ],
     )
