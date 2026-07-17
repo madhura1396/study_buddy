@@ -16,7 +16,7 @@ from src.ingest import get_collection
 
 QUIZ_HISTORY_PATH = DATA_DIR / ".quiz_history.json"
 
-MCQ_SYSTEM_PROMPT = (
+GROUNDED_MCQ_SYSTEM_PROMPT = (
     "You are a study quiz generator. Given study material, write {n} "
     "multiple-choice questions that test understanding of it. Each question "
     "must have exactly 4 options with exactly one correct answer. Respond "
@@ -27,12 +27,39 @@ MCQ_SYSTEM_PROMPT = (
     "facts beyond it."
 )
 
-FLASHCARD_SYSTEM_PROMPT = (
+GROUNDED_FLASHCARD_SYSTEM_PROMPT = (
     "You are a study flashcard generator. Given study material, write {n} "
     "flashcards testing recall of its key concepts. Respond with ONLY a "
     'JSON array, no other text, in this exact shape: [{{"front": "a '
     'question or term", "back": "the answer or definition"}}]. Base every '
     "card strictly on the material provided — do not invent facts beyond it."
+)
+
+# Interview-style prompts are deliberately NOT grounded in any provided
+# text — they draw on the model's general knowledge of the topic, the way
+# a real interviewer would ask beyond whatever one set of notes happens to
+# cover (e.g. edge cases, "why" questions, comparisons to related concepts).
+INTERVIEW_MCQ_SYSTEM_PROMPT = (
+    "You are an experienced technical interviewer. Given a topic, write {n} "
+    "multiple-choice questions of the kind commonly asked about this topic "
+    "in real technical interviews — draw on your general knowledge of the "
+    "subject, not limited to any specific document. Cover a mix of "
+    "fundamentals, edge cases, and \"why\"/\"when would you\" questions "
+    "typical of interview prep. Each question must have exactly 4 options "
+    "with exactly one correct answer. Respond with ONLY a JSON array, no "
+    'other text, in this exact shape: [{{"question": "...", "options": '
+    '["...", "...", "...", "..."], "correct_index": 0, "explanation": "one '
+    'sentence on why"}}].'
+)
+
+INTERVIEW_FLASHCARD_SYSTEM_PROMPT = (
+    "You are an experienced technical interviewer. Given a topic, write {n} "
+    "flashcards covering the questions and concepts commonly asked about "
+    "this topic in real technical interviews — draw on your general "
+    "knowledge of the subject, not limited to any specific document. "
+    'Respond with ONLY a JSON array, no other text, in this exact shape: '
+    '[{{"front": "an interview question or term", "back": "a strong '
+    'answer"}}].'
 )
 
 
@@ -78,8 +105,8 @@ def _parse_json_array(text: str) -> list[dict]:
         raise GenerationFailedError(f"Could not parse quiz generator output: {text[:300]}")
 
 
-def _generate(system_prompt_template: str, scope_text: str, n: int) -> list[dict]:
-    if not scope_text.strip():
+def _generate(system_prompt_template: str, user_content: str, n: int) -> list[dict]:
+    if not user_content.strip():
         raise GenerationFailedError("No content in the selected scope to generate from.")
     try:
         client = get_client()
@@ -90,7 +117,7 @@ def _generate(system_prompt_template: str, scope_text: str, n: int) -> list[dict
             model=GROQ_MODEL,
             messages=[
                 {"role": "system", "content": system_prompt_template.format(n=n)},
-                {"role": "user", "content": f"Study material:\n{scope_text}"},
+                {"role": "user", "content": user_content},
             ],
             temperature=0.3,
         )
@@ -99,12 +126,16 @@ def _generate(system_prompt_template: str, scope_text: str, n: int) -> list[dict
     return _parse_json_array(response.choices[0].message.content)
 
 
-def generate_mcqs(scope_text: str, n: int = 5) -> list[dict]:
-    return _generate(MCQ_SYSTEM_PROMPT, scope_text, n)
+def generate_mcqs(scope_text: str, n: int = 5, grounded: bool = True) -> list[dict]:
+    if grounded:
+        return _generate(GROUNDED_MCQ_SYSTEM_PROMPT, f"Study material:\n{scope_text}", n)
+    return _generate(INTERVIEW_MCQ_SYSTEM_PROMPT, f"Topic: {scope_text}", n)
 
 
-def generate_flashcards(scope_text: str, n: int = 5) -> list[dict]:
-    return _generate(FLASHCARD_SYSTEM_PROMPT, scope_text, n)
+def generate_flashcards(scope_text: str, n: int = 5, grounded: bool = True) -> list[dict]:
+    if grounded:
+        return _generate(GROUNDED_FLASHCARD_SYSTEM_PROMPT, f"Study material:\n{scope_text}", n)
+    return _generate(INTERVIEW_FLASHCARD_SYSTEM_PROMPT, f"Topic: {scope_text}", n)
 
 
 def _load_history() -> list[dict]:

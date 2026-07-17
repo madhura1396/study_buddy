@@ -342,19 +342,38 @@ with quiz_tab:
             key="quiz_chapters",
         )
 
+        style = st.radio(
+            "Question style",
+            ["From my notes", "Interview-style (general knowledge)"],
+            horizontal=True,
+            help=(
+                "\"From my notes\" only asks about what's actually in your "
+                "selected files. \"Interview-style\" uses your selection just "
+                "to identify the topic, then asks the kind of questions a "
+                "real interviewer would — not limited to your notes' content."
+            ),
+        )
+        grounded = style == "From my notes"
         mode = st.radio("Mode", ["Multiple choice", "Flashcards"], horizontal=True)
         count = st.slider("How many", min_value=3, max_value=15, value=5)
 
         if st.button("Generate", disabled=not selected_sources):
-            with st.spinner("Generating from your selected material..."):
+            with st.spinner("Generating..."):
                 try:
-                    scope_text = build_scope_text(
-                        category, selected_sources, selected_headings or None
-                    )
-                    if mode == "Multiple choice":
-                        items = generate_mcqs(scope_text, n=count)
+                    if grounded:
+                        content = build_scope_text(
+                            category, selected_sources, selected_headings or None
+                        )
                     else:
-                        items = generate_flashcards(scope_text, n=count)
+                        topics = ", ".join(s.rsplit(".", 1)[0] for s in selected_sources)
+                        content = f"{category}: {topics}"
+                        if selected_headings:
+                            content += " — focus areas: " + ", ".join(selected_headings)
+
+                    if mode == "Multiple choice":
+                        items = generate_mcqs(content, n=count, grounded=grounded)
+                    else:
+                        items = generate_flashcards(content, n=count, grounded=grounded)
                 except (MissingAPIKeyError, GenerationFailedError) as e:
                     st.error(str(e))
                     items = None
@@ -363,6 +382,8 @@ with quiz_tab:
                 scope_label = f"{category} — {', '.join(selected_sources)}"
                 if selected_headings:
                     scope_label += f" ({len(selected_headings)} chapter(s))"
+                if not grounded:
+                    scope_label += " [interview-style]"
                 st.session_state.quiz_data = {
                     "kind": "mcq" if mode == "Multiple choice" else "flashcard",
                     "items": items,
