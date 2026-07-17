@@ -53,6 +53,22 @@ def load_ingested_docs() -> list[dict]:
     return sorted(docs.values(), key=lambda d: d["uploaded_at"], reverse=True)
 
 
+def render_sources(numbered_hits: list[tuple[int, dict]]) -> None:
+    """Render all source chunks for one answer inside a single collapsed
+    expander, rather than one expander per chunk — a wall of always-visible
+    boxes under every answer felt cluttered and un-chat-like."""
+    if not numbered_hits:
+        return
+    with st.expander(f"Show sources ({len(numbered_hits)})"):
+        for i, hit in numbered_hits:
+            label = f"[{i}] {hit['source']} (chunk {hit['chunk_index']})"
+            if hit["heading"]:
+                label += f" — {hit['heading']}"
+            st.markdown(f"**{label}**")
+            st.text(hit["text"])
+            st.divider()
+
+
 def existing_categories() -> list[str]:
     if not DATA_DIR.exists():
         return []
@@ -152,7 +168,13 @@ with st.sidebar:
 ask_tab, materials_tab = st.tabs(["💬 Ask", "📂 Study Materials"])
 
 with ask_tab:
-    st.caption("Ask questions grounded in your ingested study materials.")
+    top_col, button_col = st.columns([5, 1])
+    with top_col:
+        st.caption("Ask questions grounded in your ingested study materials.")
+    with button_col:
+        if st.button("🆕 New chat"):
+            st.session_state.messages = []
+            st.rerun()
 
     # Chat-style history in session_state: st.text_input previously left the
     # question un-cleared after answering, and Streamlit only reruns a script
@@ -160,18 +182,15 @@ with ask_tab:
     # or wanting to ask a fresh one without manually clearing the box, silently
     # did nothing. st.chat_input auto-clears after every submission and always
     # triggers a rerun, which is what makes "ask the next question" work.
+    # New questions always append below the existing thread; only the "New
+    # chat" button above clears it, so past Q&A stays visible as you go.
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
     for message in st.session_state.messages:
         with st.chat_message(message["role"]):
             st.markdown(message["content"])
-            for i, hit in message.get("hits", []):
-                label = f"[{i}] {hit['source']} (chunk {hit['chunk_index']})"
-                if hit["heading"]:
-                    label += f" — {hit['heading']}"
-                with st.expander(label):
-                    st.text(hit["text"])
+            render_sources(message.get("hits", []))
 
     question = st.chat_input("Ask a question, e.g. What is the linearity assumption?")
 
@@ -193,12 +212,7 @@ with ask_tab:
 
             st.markdown(result["answer"])
             numbered_hits = list(enumerate(result["hits"], start=1))
-            for i, hit in numbered_hits:
-                label = f"[{i}] {hit['source']} (chunk {hit['chunk_index']})"
-                if hit["heading"]:
-                    label += f" — {hit['heading']}"
-                with st.expander(label):
-                    st.text(hit["text"])
+            render_sources(numbered_hits)
 
         st.session_state.messages.append(
             {"role": "assistant", "content": result["answer"], "hits": numbered_hits}
